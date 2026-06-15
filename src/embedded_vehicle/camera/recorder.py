@@ -111,9 +111,8 @@ class CameraRecorder:
 
         # Storage
         self.video_dir = self.cfg.video_dir
-        self.video_dir.mkdir(parents=True, exist_ok=True)
-        self.segments: list[VideoSegment] = []
         self._max_usage = self.cfg.max_disk_usage_percent / 100.0
+        self.segments: list[VideoSegment] = []
 
         # Encryption
         self._fernet: Fernet | None = None

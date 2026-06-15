@@ -56,6 +56,9 @@ dependencies = [
     "psutil>=5.9.0",
     # SQLite utilities
     "aiosqlite>=0.19.0",
+    # HTTP API framework (dashboard, remote diagnostics)
+    "fastapi>=0.110.0",
+    "starlette>=0.36.0",
 ]
 
 [project.optional-dependencies]

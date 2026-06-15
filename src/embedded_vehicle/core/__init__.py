@@ -118,6 +118,11 @@ class EventType(Enum):
     AUDIO_ALERT = auto()
     COLLISION_WARNING = auto()
 
+    # Engine / vehicle events
+    ENGINE_STARTED = auto()
+    ENGINE_STOPPED = auto()
+    MAINTENANCE_DUE = auto()
+
 
 @dataclass
 class Event:

@@ -83,6 +83,19 @@ def pytest_configure(config: pytest.Config) -> None:
         sys.modules["telegram"] = MagicMock()
         sys.modules["telegram.ext"] = MagicMock()
 
+    # Mock python-can so embedded_vehicle.modern_vehicle.can_multibus can be imported
+    if "can" not in sys.modules:
+        import types
+        mock_can = types.ModuleType("can")
+        mock_can.interface = types.ModuleType("can.interface")
+        mock_can.interface.Bus = MagicMock()
+        mock_can.Message = MagicMock()
+        sys.modules["can"] = mock_can
+        sys.modules["can.interface"] = mock_can.interface
+        # Also pre-emptively mock cantools
+        if "cantools" not in sys.modules:
+            sys.modules["cantools"] = MagicMock()
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Event bus fixture
@@ -113,7 +126,8 @@ def captured_events(event_bus: EventBus) -> list:
 
 @pytest.fixture
 def mock_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MainConfig:
-    """Return a MainConfig with all paths redirected to tmp_path."""
+    """Return a MainConfig with all paths redirected to tmp_path and patch global settings."""
+    from embedded_vehicle.core.config import MainConfig, settings as _settings
     cfg = MainConfig()
     cfg.data_dir = tmp_path / "data"
     cfg.camera.video_dir = tmp_path / "video"
@@ -125,6 +139,21 @@ def mock_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> MainConfig:
     cfg.camera.encryption_key_path = tmp_path / "video.key"
     cfg.telegram.bot_token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
     cfg.telegram.allowed_chat_ids = [123456789]
+    # Patch all per-module `settings` imports so they see the test config
+    for mod in (
+        "embedded_vehicle.camera.recorder",
+        "embedded_vehicle.storage.manager",
+        "embedded_vehicle.audio.assistant",
+        "embedded_vehicle.obd.interface",
+        "embedded_vehicle.imu.sensor",
+        "embedded_vehicle.gps.tracker",
+        "embedded_vehicle.gpio.controller",
+        "embedded_vehicle.telegram.bot",
+    ):
+        try:
+            monkeypatch.setattr(f"{mod}.settings", cfg)
+        except AttributeError:
+            pass  # module not imported yet; main patch covers it
     return cfg
 
 
@@ -296,7 +325,8 @@ def mock_lgpio(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     mock_mod.gpio_claim_input = MagicMock()
     mock_mod.gpio_write = MagicMock()
     mock_mod.gpio_read.return_value = 0
-    monkeypatch.setattr("embedded_vehicle.gpio.controller.lgpio", mock_mod)
+    # Patch the wrapped import name (_lgpio) used inside controller.py
+    monkeypatch.setattr("embedded_vehicle.gpio.controller._lgpio", mock_mod)
     return mock_mod
 
 
@@ -337,10 +367,10 @@ def mock_pyaudio(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     mock_mod = MagicMock()
     mock_instance = MagicMock()
     mock_instance.get_device_count.return_value = 2
-    mock_instance.get_device_info_by_index.side_effect = [
+    mock_instance.get_device_info_by_index.side_effect = lambda i: [
         {"name": " bcm2835", "index": 0},
         {"name": "USB Microphone", "index": 1},
-    ]
+    ][i % 2]
     mock_instance.terminate = MagicMock()
     mock_mod.PyAudio.return_value = mock_instance
 

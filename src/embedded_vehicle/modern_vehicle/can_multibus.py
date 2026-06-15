@@ -118,10 +118,9 @@ class CANMultibusController:
         """Initialize a single CAN bus via MCP2515/MCP2517FD."""
         try:
             import can
-            from can.interface import Bus
 
             channel = f"spi0.{config['cs']}"
-            bus = Bus(
+            bus = can.interface.Bus(
                 channel=channel,
                 bustype="socketcan",
                 bitrate=config["baudrate"],

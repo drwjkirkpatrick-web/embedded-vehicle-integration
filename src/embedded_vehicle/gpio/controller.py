@@ -39,6 +39,11 @@ from embedded_vehicle.core.config import settings
 
 logger = logging.getLogger("vehicle.gpio")
 
+# lgpio is a Pi-specific optional dependency; wrap import so module loads off-Pi too.
+try:
+    import lgpio as _lgpio
+except ImportError:  # pragma: no cover
+    _lgpio = None  # type: ignore[assignment]
 
 class RelayName(Enum):
     """Named relays for type-safe control."""
@@ -132,26 +137,23 @@ class GPIOController:
     async def start(self) -> None:
         """Initialize lgpio, configure pins, start input polling."""
         logger.info("GPIO: initializing lgpio...")
-        try:
-            import lgpio
-            self._h = lgpio.gpiochip_open(0)  # /dev/gpiochip0
-        except ImportError:
+        if _lgpio is None:
             logger.error("GPIO: lgpio not installed. Run: sudo apt install python3-lgpio")
             return
+        try:
+            self._h = _lgpio.gpiochip_open(0)  # /dev/gpiochip0
         except Exception as exc:
             logger.error("GPIO: failed to open gpiochip: %s", exc)
             return
 
-        import lgpio as lg
-
         # Configure relay pins as outputs, default HIGH (relay OFF)
         for name, pin in self._relay_pins.items():
-            lg.gpio_claim_output(self._h, pin, level=1)
+            _lgpio.gpio_claim_output(self._h, pin, level=1)
             logger.debug("GPIO: relay %s on pin %d (default OFF)", name.value, pin)
 
         # Configure inputs with pull-down (most car switches go +12V when closed)
         for name, pin in self._input_pins.items():
-            lg.gpio_claim_input(self._h, pin, lgpio.SET_PULL_DOWN)
+            _lgpio.gpio_claim_input(self._h, pin, _lgpio.SET_PULL_DOWN)
             logger.debug("GPIO: input %s on pin %d (pull-down)", name.value, pin)
 
         # Initialize SPI for MCP3008
@@ -181,24 +183,22 @@ class GPIOController:
         if self._spi:
             self._spi.close()
 
-        if self._h is not None:
-            import lgpio
-            lgpio.gpiochip_close(self._h)
+        if self._h is not None and _lgpio is not None:
+            _lgpio.gpiochip_close(self._h)
             self._h = None
 
         logger.info("GPIO: controller stopped")
 
     async def set_relay(self, name: RelayName, on: bool) -> bool:
         """Set a relay ON or OFF. Returns success."""
-        if self._h is None:
+        if self._h is None or _lgpio is None:
             logger.warning("GPIO: not initialized, cannot set relay")
             return False
 
         pin = self._relay_pins[name]
-        import lgpio
         # Active-low: LOW = ON, HIGH = OFF
         level = 0 if on else 1
-        lgpio.gpio_write(self._h, pin, level)
+        _lgpio.gpio_write(self._h, pin, level)
 
         state = self._relay_states[name]
         state.on = on
@@ -271,12 +271,14 @@ class GPIOController:
 
     async def _poll_loop(self) -> None:
         """Poll digital inputs at 10 Hz, debounce, emit events."""
-        import lgpio
         while self._running:
             try:
                 for name, pin in self._input_pins.items():
                     state = self._input_states[name]
-                    raw = lgpio.gpio_read(self._h, pin)
+                    if self._h is not None and _lgpio is not None:
+                        raw = _lgpio.gpio_read(self._h, pin)
+                    else:
+                        raw = 0
                     now = time.monotonic()
 
                     # Debounce: ignore changes within 100ms
